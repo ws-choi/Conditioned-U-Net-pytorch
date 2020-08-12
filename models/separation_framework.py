@@ -39,7 +39,7 @@ class ConditionalSS_Framework(pl.LightningModule):
                                                     n_fft=self.n_fft,
                                                     hop_length=self.hop_length,
                                                     num_frame=self.num_frame,
-                                                    cache_mode=False)
+                                                    cache_mode=True)
 
     def forward(self, input_signal, input_condition):
         input_spec = self.to_spec(input_signal)
