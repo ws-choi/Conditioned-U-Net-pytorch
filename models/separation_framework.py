@@ -28,6 +28,19 @@ class ConditionalSS_Framework(pl.LightningModule):
         self.masking_based = masking_based
         self.batch_size = batch_size
 
+        self.musdb_loader = MusdbLoader(musdb_root=self.musdb_root)
+        if self.data_cache:
+            self.cached_musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
+                                                    n_fft=self.n_fft,
+                                                    hop_length=self.hop_length,
+                                                    num_frame=self.num_frame,
+                                                    cache_mode=True)
+            self.cached_musdb_valid = MusdbValidSet(self.musdb_loader.musdb_valid,
+                                                    n_fft=self.n_fft,
+                                                    hop_length=self.hop_length,
+                                                    num_frame=self.num_frame,
+                                                    cache_mode=False)
+
     def forward(self, input_signal, input_condition):
         input_spec = self.to_spec(input_signal)
         output_spec = self.spec2spec(input_spec, input_condition)
@@ -46,23 +59,29 @@ class ConditionalSS_Framework(pl.LightningModule):
         pass
 
     def prepare_data(self):
-        self.musdb_loader = MusdbLoader(musdb_root = self.musdb_root)
+        pass
 
     def train_dataloader(self) -> DataLoader:
-        musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
-                                    n_fft=self.n_fft,
-                                    hop_length=self.hop_length,
-                                    num_frame=self.num_frame,
-                                    cache_mode=self.data_cache)
+        if self.data_cache:
+            musdb_train = self.cached_musdb_train
+        else:
+            musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
+                                        n_fft=self.n_fft,
+                                        hop_length=self.hop_length,
+                                        num_frame=self.num_frame,
+                                        cache_mode=False)
 
         return DataLoader(musdb_train, batch_size=self.batch_size)
 
     def val_dataloader(self):
-        musdb_valid = MusdbValidSet(self.musdb_loader.musdb_train,
-                                    n_fft=self.n_fft,
-                                    hop_length=self.hop_length,
-                                    num_frame=self.num_frame,
-                                    cache_mode=self.data_cache)
+        if self.data_cache:
+            musdb_valid = self.cached_musdb_valid
+        else:
+            musdb_valid = MusdbValidSet(self.musdb_loader.musdb_valid,
+                                        n_fft=self.n_fft,
+                                        hop_length=self.hop_length,
+                                        num_frame=self.num_frame,
+                                        cache_mode=False)
 
         return DataLoader(musdb_valid)
 
@@ -158,14 +177,9 @@ class Magnitude_Masking(ConditionalSS_Framework):
         )
 
     def to_spec(self, input_signal) -> torch.Tensor:
-        return self.stft.to_mag(input_signal).transpose(-1,-3)[...,1:]
+        return self.stft.to_mag(input_signal).transpose(-1, -3)[..., 1:]
 
     def separate(self, input_signal, input_condition) -> torch.Tensor:
         mag, phase = self.stft.to_mag_phase(input_signal)
-        mag_hat = self.forward(mag.transpose(-1,-3), input_condition)
-        return self.stft.restore_mag_phase(mag_hat.transpose(-1,-3), phase)
-
-
-
-
-
+        mag_hat = self.forward(mag.transpose(-1, -3), input_condition)
+        return self.stft.restore_mag_phase(mag_hat.transpose(-1, -3), phase)

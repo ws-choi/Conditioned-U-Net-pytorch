@@ -7,7 +7,6 @@ from models.separation_framework import Magnitude_Masking, ConditionalSS_Framewo
 
 def main(args):
     dict_args = vars(args)
-    print(dict_args)
     model = Magnitude_Masking(**dict_args)
 
     temp_args, _ = parser.parse_known_args()
