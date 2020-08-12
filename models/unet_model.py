@@ -1,22 +1,19 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from source_separation.FiLM_utils import FiLM_complex, FiLM_simple
 
 
 class u_net_conv_block(pl.LightningModule):
-    def __init__(self, conv_layer, bn_layer, FiLM_layer, activation):
+    def __init__(self, bn_layer, conv_layer, activation):
         super(u_net_conv_block, self).__init__()
         self.bn_layer = bn_layer
         self.conv_layer = conv_layer
-        self.FiLM_layer = FiLM_layer
         self.activation = activation
         self.in_channels = self.conv_layer.conv.in_channels
         self.out_channels = self.conv_layer.conv.out_channels
 
-    def forward(self, x, gamma, beta):
+    def forward(self, x):
         x = self.bn_layer(self.conv_layer(x))
-        x = self.FiLM_layer(x, gamma, beta)
         return self.activation(x)
 
 
@@ -68,25 +65,21 @@ class ConvTranspose2d_same(pl.LightningModule):
         return self.deconv(x)
 
 
-class CUNET(pl.LightningModule):
+class UNET(pl.LightningModule):
 
     def __init__(self,
                  n_layers,
                  input_channels,
                  filters_layer_1,
-                 condition_generator,
                  kernel_size=(5, 5),
                  stride=(2, 2),
-                 film_type='simple',
                  encoder_activation=nn.LeakyReLU,
                  decoder_activation=nn.ReLU,
                  last_activation=nn.Sigmoid,
-                 *args, **kwargs
                  ):
 
-        super(CUNET, self).__init__(*args, **kwargs)
+        super(UNET, self).__init__()
         self.n_layers = n_layers
-        self.condition_generator = condition_generator
         self.input_channels = input_channels
         self.filters_layer_1 = filters_layer_1
         encoder_layers = []
@@ -99,7 +92,6 @@ class CUNET(pl.LightningModule):
                 u_net_conv_block(
                     conv_layer=Conv2d_same(input_channels, output_channels, kernel_size, stride),
                     bn_layer=nn.BatchNorm2d(output_channels),
-                    FiLM_layer=FiLM_simple if film_type == "simple" else FiLM_complex,
                     activation=encoder_activation()
                 )
             )
@@ -139,22 +131,18 @@ class CUNET(pl.LightningModule):
 
             self.decoders = nn.ModuleList(decoders)
 
-    def forward(self, x):
+    def forward(self, input_spec):
 
+        x = input_spec
         # Encoding Phase
         encoder_outputs = []
         for encoder in self.encoders:
-            encoder_outputs.append(encoder(x, torch.rand_like(x[:, 0, 0, 0]), torch.rand_like(x[:, 0, 0, 0])))  # TODO
+            encoder_outputs.append(encoder(x))
             x = encoder_outputs[-1]
 
         # Decoding Phase
         x = self.decoders[0](x)
         for decoder, x_encoded in zip(self.decoders[1:], reversed(encoder_outputs[:-1])):
             x = decoder(torch.cat([x, x_encoded], dim=-3))
+
         return x
-
-
-model = CUNET(6, 2, 16, None)
-encoded = model(torch.randn((16, 2, 512, 128)))
-
-a = 3;

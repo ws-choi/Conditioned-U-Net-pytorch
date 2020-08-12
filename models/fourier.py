@@ -28,7 +28,7 @@ class STFT(pl.LightningModule):
         super().__init__(*args, **kwargs)
         self.n_fft = n_fft
         self.hop_length = hop_length
-        self.window = torch.hann_window(n_fft)
+        self.window = torch.nn.Parameter(torch.hann_window(n_fft), requires_grad=False)
 
     def forward(self, input_signal):
         return self.to_spec_complex(input_signal)
@@ -38,12 +38,12 @@ class STFT(pl.LightningModule):
         input_signal: *, signal
         output: *, N, T, 2
         """
-        if input_signal.dtype != self.window.dtype:
-            window = torch.as_tensor(self.window, dtype=input_signal.dtype)
-        else:
-            window = self.window
+        # if input_signal.dtype != self.window.dtype or input_signal.device != self.window.device :
+        #     self.window = torch.as_tensor(self.window, dtype=input_signal.dtype, device=input_signal.device)
+        # else:
+        #     window = self.window
 
-        return torch.stft(input_signal, self.n_fft, self.hop_length, window=window)
+        return torch.stft(input_signal, self.n_fft, self.hop_length, window=self.window)
 
     def to_mag(self, input_signal, power=1.0):
         """

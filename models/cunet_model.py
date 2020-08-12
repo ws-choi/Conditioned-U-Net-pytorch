@@ -1,71 +1,35 @@
+from typing import Union, List, Optional, Sequence, Dict, Tuple
+
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from torch.optim import Optimizer
+from torch.utils.data import DataLoader
+
+from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
+from models.unet_model import u_net_deconv_block, Conv2d_same, ConvTranspose2d_same
+from models.FiLM_utils import FiLM_complex, FiLM_simple
+from models.control_models import dense_control_block, dense_control_model
+from global_config.config import config
 
 
 class u_net_conv_block(pl.LightningModule):
-    def __init__(self, bn_layer, conv_layer, activation):
+    def __init__(self, conv_layer, bn_layer, FiLM_layer, activation):
         super(u_net_conv_block, self).__init__()
         self.bn_layer = bn_layer
         self.conv_layer = conv_layer
+        self.FiLM_layer = FiLM_layer
         self.activation = activation
         self.in_channels = self.conv_layer.conv.in_channels
         self.out_channels = self.conv_layer.conv.out_channels
 
-    def forward(self, x):
+    def forward(self, x, gamma, beta):
         x = self.bn_layer(self.conv_layer(x))
+        x = self.FiLM_layer(x, gamma, beta)
         return self.activation(x)
 
 
-class u_net_deconv_block(pl.LightningModule):
-
-    def __init__(self, deconv_layer, bn_layer, activation, dropout):
-        super(u_net_deconv_block, self).__init__()
-        self.bn_layer = bn_layer
-        self.deconv_layer = deconv_layer
-        self.dropout = nn.Dropout() if dropout else nn.Identity()
-        self.activation = activation
-
-    def forward(self, x):
-        x = self.bn_layer(self.deconv_layer(x))
-        x = self.dropout(x)
-        return self.activation(x)
-
-
-class Conv2d_same(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, kernel_size=(5, 5), stride=(2, 2)):
-        super(Conv2d_same, self).__init__()
-        padding = [((k - s + 1) // 2) for k, s in zip(kernel_size, stride)]
-        self.conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=padding)
-
-    def forward(self, x):
-        return self.conv(x)
-
-
-class ConvTranspose2d_same(pl.LightningModule):
-
-    def __init__(self, in_channels, out_channels, kernel_size=(5, 5), stride=(2, 2)):
-        super(ConvTranspose2d_same, self).__init__()
-
-        # Assuming dilation = 1,
-        # H_out = (H_in-1) * stride - 2 * padding + (kernel_size -1) + output_padding + 1
-        # We want to make H_out = H_in * stride => Thus,
-        # H_in * stride = (H_in-1) * stride - 2 * padding + (kernel_size -1) + output_padding + 1
-        # 0 = (0-1) * stride - 2 * padding + kernel_size  + output_padding
-        # 2 * padding = -stride + (kernel_size + output_padding)
-        # padding = (- stride + kernel_size + output_padding   )/2
-
-        output_padding = [abs(k % 2 - s % 2) for k, s in zip(kernel_size, stride)]
-        padding = [(k - s + o) // 2 for k, s, o in zip(kernel_size, stride, output_padding)]
-        self.deconv = nn.ConvTranspose2d(
-            in_channels, out_channels, kernel_size, stride, padding, output_padding=output_padding
-        )
-
-    def forward(self, x):
-        return self.deconv(x)
-
-
-class UNET(pl.LightningModule):
+class CUNET(pl.LightningModule):
 
     def __init__(self,
                  n_layers,
@@ -73,12 +37,18 @@ class UNET(pl.LightningModule):
                  filters_layer_1,
                  kernel_size=(5, 5),
                  stride=(2, 2),
+                 film_type='simple',
+                 control_type='dense',
                  encoder_activation=nn.LeakyReLU,
                  decoder_activation=nn.ReLU,
                  last_activation=nn.Sigmoid,
+                 control_input_dim=4,
+                 control_n_layer=4,
+                 *args, **kwargs
                  ):
 
-        super(UNET, self).__init__()
+        super(CUNET, self).__init__(*args, **kwargs)
+        self.input_control_dims = control_input_dim
         self.n_layers = n_layers
         self.input_channels = input_channels
         self.filters_layer_1 = filters_layer_1
@@ -92,6 +62,7 @@ class UNET(pl.LightningModule):
                 u_net_conv_block(
                     conv_layer=Conv2d_same(input_channels, output_channels, kernel_size, stride),
                     bn_layer=nn.BatchNorm2d(output_channels),
+                    FiLM_layer=FiLM_simple if film_type == "simple" else FiLM_complex,
                     activation=encoder_activation()
                 )
             )
@@ -131,13 +102,38 @@ class UNET(pl.LightningModule):
 
             self.decoders = nn.ModuleList(decoders)
 
-    def forward(self, input_spec):
+        # Control Mechanism
+        if film_type == "simple":
+            control_output_dim = n_conditions = n_layers
+            split = lambda tensor: [tensor[..., i] for i in range(n_layers)]
+        else:
+            output_channel_array = [encoder.conv_layer.conv.out_channels for encoder in self.encoders]
+            control_output_dim = n_conditions = sum(output_channel_array)
+
+            start_idx_per_layer = [sum(output_channel_array[:i]) for i in range(len(output_channel_array))]
+            end_idx_per_layer = [sum(output_channel_array[:i + 1]) for i in range(len(output_channel_array))]
+
+            split = lambda tensor: [tensor[..., start:end] for start, end in
+                                    zip(start_idx_per_layer, end_idx_per_layer)]
+        if control_type == "dense":
+            self.condition_generator = dense_control_model(
+                dense_control_block(control_input_dim, control_n_layer),
+                control_output_dim,
+                split
+            )
+        else:
+            raise NotImplementedError
+
+    def forward(self, input_spec, input_condition):
+
+        gammas, betas = self.condition_generator(input_condition)
 
         x = input_spec
+
         # Encoding Phase
         encoder_outputs = []
-        for encoder in self.encoders:
-            encoder_outputs.append(encoder(x))
+        for encoder, gamma, beta in zip(self.encoders, gammas, betas):
+            encoder_outputs.append(encoder(x, gamma, beta))  # TODO
             x = encoder_outputs[-1]
 
         # Decoding Phase
@@ -145,11 +141,14 @@ class UNET(pl.LightningModule):
         for decoder, x_encoded in zip(self.decoders[1:], reversed(encoder_outputs[:-1])):
             x = decoder(torch.cat([x, x_encoded], dim=-3))
 
-        mask = x
-        return mask * input_spec
+        return x
 
-
-model = UNET(6, 2, 16)
-encoded = model(torch.randn((16, 2, 512, 128)))
-
-a = 3;
+#
+#
+#
+# model = CUNET(6, 2, 16, film_type='simple')
+# x_spectrogram = torch.randn((16, 2, 512, 128))
+# x_condition = torch.randn((16, 4))
+# encoded = model(x_spectrogram, x_condition)
+#
+# a = 3;

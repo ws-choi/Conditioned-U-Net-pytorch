@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 
 # data
-data/musdb/
+data/musdb*
 
 #tmp
 tmp*
