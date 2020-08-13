@@ -13,6 +13,23 @@ from models.control_models import dense_control_block, dense_control_model
 from global_config.config import config
 
 
+def get_func_by_name(activation_str):
+    if activation_str == "leaky_relu":
+        return nn.LeakyReLU
+    elif activation_str == "relu":
+        return nn.ReLU
+    elif activation_str == "sigmoid":
+        return nn.Sigmoid
+    elif activation_str == "tanh":
+        return nn.Tanh
+    elif activation_str == "softmax":
+        return nn.Softmax
+    elif activation_str == "identity":
+        return nn.Identity
+    else:
+        return None
+
+
 class u_net_conv_block(pl.LightningModule):
     def __init__(self, conv_layer, bn_layer, FiLM_layer, activation):
         super(u_net_conv_block, self).__init__()
@@ -46,6 +63,10 @@ class CUNET(pl.LightningModule):
                  control_n_layer=4,
                  *args, **kwargs
                  ):
+
+        encoder_activation = get_func_by_name(encoder_activation)
+        decoder_activation = get_func_by_name(decoder_activation)
+        last_activation = get_func_by_name(last_activation)
 
         super(CUNET, self).__init__(*args, **kwargs)
         self.input_control_dims = control_input_dim

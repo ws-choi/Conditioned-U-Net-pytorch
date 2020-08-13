@@ -93,8 +93,8 @@ class ConditionalSS_Framework(pl.LightningModule):
         target = self.to_spec(target_signal)
         target_hat = self.forward(mixture_signal, condition)
         loss = F.mse_loss(target, target_hat)
-        result = pl.TrainResult(loss, checkpoint_on=loss, early_stop_on=loss)
-        result.log('train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
+        result = pl.TrainResult(loss)
+        result.log('loss/train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
         return result
 
     def validation_step(self, batch, batch_idx):
@@ -103,9 +103,14 @@ class ConditionalSS_Framework(pl.LightningModule):
         target_hat = self.forward(mixture_signal, condition)
         loss = F.mse_loss(target, target_hat)
 
-        result = pl.EvalResult(checkpoint_on=loss)
+        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
         result.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
         return result
+
+    def init_weights(self):
+        for param in self.parameters():
+            if param.dim() > 1:
+                nn.init.kaiming_normal_(param)
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -113,7 +118,6 @@ class ConditionalSS_Framework(pl.LightningModule):
         parser.add_argument('--n_fft', type=int, default=1024)
         parser.add_argument('--hop_length', type=int, default=256)
         parser.add_argument('--num_frame', type=int, default=128)
-
         parser.add_argument('--n_layers', type=int, default=6)
         parser.add_argument('--input_channels', type=int, default=2)
         parser.add_argument('--filters_layer_1', type=int, default=16)
@@ -121,17 +125,15 @@ class ConditionalSS_Framework(pl.LightningModule):
         parser.add_argument('--stride', default=(2, 2))
         parser.add_argument('--film_type', type=str, default='simple')
         parser.add_argument('--control_type', type=str, default='dense')
-        parser.add_argument('--encoder_activation', default=nn.LeakyReLU)
-        parser.add_argument('--decoder_activation', default=nn.ReLU)
-        parser.add_argument('--last_activation', default=nn.Sigmoid)
+        parser.add_argument('--encoder_activation', type=str, default='leaky_relu')
+        parser.add_argument('--decoder_activation', type=str, default='relu')
+        parser.add_argument('--last_activation', type=str, default='sigmoid')
         parser.add_argument('--control_input_dim', type=int, default=4)
         parser.add_argument('--control_n_layer', type=int, default=4)
+        parser.add_argument('--masking_based', type=bool, default=True)
 
         parser.add_argument('--musdb_root', type=str, default='data/musdb18_wav/')
         parser.add_argument('--no_data_cache', type=bool, default=False)
-
-        parser.add_argument('--masking_based', type=bool, default=True)
-
         parser.add_argument('--batch_size', type=int, default=16)
         parser.add_argument('--dev_mode', type=bool, default=False)
 
@@ -174,6 +176,25 @@ class Magnitude_Masking(ConditionalSS_Framework):
             last_activation,
             control_input_dim,
             control_n_layer
+        )
+
+        self.init_weights()
+
+        self.save_hyperparameters(
+            'n_fft',
+            'hop_length',
+            'n_layers',
+            'input_channels',
+            'filters_layer_1',
+            'kernel_size',
+            'stride',
+            'film_type',
+            'control_type',
+            'encoder_activation',
+            'decoder_activation',
+            'last_activation',
+            'control_input_dim',
+            'control_n_layer'
         )
 
     def to_spec(self, input_signal) -> torch.Tensor:

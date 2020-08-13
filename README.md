@@ -9,7 +9,7 @@ I'm implementing it, and it takes about at least two weeks.
 conda install pytorch>=1.6 cudatoolkit=10.2 -c pytorch
 conda install -c conda-forge ffmpeg librosa
 conda install -c anaconda jupyter
-pip install musdb museval pytorch_lightning effortless_config tensorboard
+pip install musdb museval pytorch_lightning effortless_config tensorboard wandb
 pip install https://github.com/PytorchLightning/pytorch-lightning/archive/0.9.0rc12.zip --upgrade
 ```
 
