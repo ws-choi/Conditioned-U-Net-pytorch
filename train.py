@@ -30,7 +30,7 @@ def main(args):
         # if not os.path.exists(temp_args.tensorboard_path):
         #     os.mkdir(temp_args.tensorboard_path)
         # tb_logger = pl_loggers.TensorBoardLogger(temp_args.tensorboard_path, name=model_name)
-        logger = WandbLogger(project='source_separation', tags=model_name, offline=False, id='cunets')
+        logger = WandbLogger(project='source_separation', tags=model_name, offline=False, id=temp_args.run_id)
         logger.log_hyperparams(model.hparams)
         logger.watch(model, log='all')
     else:
@@ -51,6 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--float16', type=bool, default=False)
     parser.add_argument('--log_system', type=str, default='wandb')
     parser.add_argument('--model_name', type=str, default='cunet_dense_simple')
+    parser.add_argument('--run_id', type=str, default=None)
 
     args = parser.parse_args()
 
