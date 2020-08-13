@@ -1,18 +1,20 @@
 from abc import ABCMeta
 from argparse import ArgumentParser
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
 
-from models import fourier
 import models.cunet_model as cunet
+from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
+from models import fourier
+
 
 class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
-    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, batch_size, dev_mode, optimizer, lr, **kwargs):
+    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, batch_size, dev_mode, optimizer, lr, num_workers, pin_memory, **kwargs):
         super(Conditional_Source_Separation, self).__init__()
 
         self.n_fft = n_fft
@@ -26,6 +28,8 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
         self.lr = lr
         self.optimizer = optimizer
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
 
         self.musdb_loader = MusdbLoader(musdb_root=self.musdb_root)
         if self.data_cache:
@@ -52,7 +56,10 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                                         num_frame=self.num_frame,
                                         cache_mode=False)
 
-        return DataLoader(musdb_train, batch_size=self.batch_size)
+        return DataLoader(musdb_train,
+                          batch_size=self.batch_size,
+                          num_workers=self.num_workers,
+                          pin_memory=self.pin_memory)
 
     def val_dataloader(self):
         if self.data_cache:
@@ -64,7 +71,10 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                                         num_frame=self.num_frame,
                                         cache_mode=False)
 
-        return DataLoader(musdb_valid)
+        return DataLoader(musdb_valid,
+                          batch_size=self.batch_size,
+                          num_workers=self.num_workers,
+                          pin_memory=self.pin_memory)
 
     def configure_optimizers(self):
 
@@ -119,6 +129,8 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         parser.add_argument('--batch_size', type=int, default=16)
         parser.add_argument('--lr', type=float, default=1e-3)
         parser.add_argument('--optimizer', type=str, default='adam')
+        parser.add_argument('--num_workers', type=int, default=0)
+        parser.add_argument('--pin_memory', type=bool, default=False)
 
         return parser
 
