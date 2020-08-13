@@ -17,7 +17,7 @@ class MusdbLoader(object):
 
 class MusdbTrainSet(Dataset):
 
-    def __init__(self, musdb_train, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True):
+    def __init__(self, musdb_train, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True, dev_mode=False):
 
         self.musdb_train = musdb_train
         self.window_length = hop_length + hop_length * (num_frame - 1) - 1
@@ -30,13 +30,15 @@ class MusdbTrainSet(Dataset):
         else:
             self.target_names = target_names
 
-        self.num_tracks = len(self.musdb_train)
+        # development mode
+        self.num_tracks = 4 if dev_mode else len(self.musdb_train)
+        self.lengths = self.lengths[:4]
 
         self.cache_mode = cache_mode
         if cache_mode:
             self.cache = {}
             print('cache audio files.')
-            for idx in tqdm(range(len(self.musdb_train))):
+            for idx in tqdm(range(self.num_tracks)):
                 self.cache[idx] = {}
                 for source in self.source_names:
                     self.cache[idx][source] = self.musdb_train[idx].targets[source].audio.astype(np.float32)
@@ -70,7 +72,7 @@ class MusdbTrainSet(Dataset):
 
 class MusdbValidSet(Dataset):
 
-    def __init__(self, musdb_valid, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True):
+    def __init__(self, musdb_valid, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True, dev_mode=False):
 
         self.musdb_valid = musdb_valid
         self.window_length = hop_length + hop_length * (num_frame - 1) - 1
@@ -83,7 +85,10 @@ class MusdbValidSet(Dataset):
         else:
             self.target_names = target_names
 
-        self.num_tracks = len(self.musdb_valid)
+        # development mode
+        self.num_tracks = 4 if dev_mode else len(self.musdb_valid)
+        self.lengths = self.lengths[:4]
+
         num_chunks = [length // self.window_length for length in self.lengths]
         self.chunk_idx = [sum(num_chunks[:i + 1]) for i in range(self.num_tracks)]
 
@@ -91,7 +96,7 @@ class MusdbValidSet(Dataset):
         if cache_mode:
             self.cache = {}
             print('cache audio files.')
-            for idx in tqdm(range(len(self.musdb_valid))):
+            for idx in tqdm(range(self.num_tracks)):
                 self.cache[idx] = {}
                 for source in self.source_names + ['linear_mixture']:
                     self.cache[idx][source] = self.musdb_valid[idx].targets[source].audio.astype(np.float32)

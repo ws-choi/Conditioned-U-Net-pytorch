@@ -18,7 +18,7 @@ from models import fourier, cunet_model
 
 class ConditionalSS_Framework(pl.LightningModule):
 
-    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, masking_based, batch_size, **kwargs):
+    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, masking_based, batch_size, dev_mode, **kwargs):
         super(ConditionalSS_Framework, self).__init__()
         self.n_fft = n_fft
         self.hop_length = hop_length
@@ -27,6 +27,7 @@ class ConditionalSS_Framework(pl.LightningModule):
         self.data_cache = not no_data_cache
         self.masking_based = masking_based
         self.batch_size = batch_size
+        self.dev_mode = dev_mode
 
         self.musdb_loader = MusdbLoader(musdb_root=self.musdb_root)
         if self.data_cache:
@@ -34,12 +35,14 @@ class ConditionalSS_Framework(pl.LightningModule):
                                                     n_fft=self.n_fft,
                                                     hop_length=self.hop_length,
                                                     num_frame=self.num_frame,
-                                                    cache_mode=True)
+                                                    cache_mode=True,
+                                                    dev_mode=self.dev_mode)
             self.cached_musdb_valid = MusdbValidSet(self.musdb_loader.musdb_valid,
                                                     n_fft=self.n_fft,
                                                     hop_length=self.hop_length,
                                                     num_frame=self.num_frame,
-                                                    cache_mode=True)
+                                                    cache_mode=True,
+                                                    dev_mode = self.dev_mode)
 
     def forward(self, input_signal, input_condition):
         input_spec = self.to_spec(input_signal)
@@ -93,9 +96,9 @@ class ConditionalSS_Framework(pl.LightningModule):
         target = self.to_spec(target_signal)
         target_hat = self.forward(mixture_signal, condition)
         loss = F.mse_loss(target, target_hat)
-        # return loss #pl.TrainResult(loss, checkpoint_on=loss, early_stop_on=loss)
-
-        return {'loss': loss}
+        result = pl.TrainResult(loss, checkpoint_on=loss, early_stop_on=loss)
+        result.log('train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
+        return result
 
     def validation_step(self, batch, batch_idx):
         mixture_signal, target_signal, condition = batch
@@ -103,10 +106,9 @@ class ConditionalSS_Framework(pl.LightningModule):
         target_hat = self.forward(mixture_signal, condition)
         loss = F.mse_loss(target, target_hat)
 
-        # result = pl.EvalResult(checkpoint_on=loss)
-        # result.log('val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
-        # result.log('val_loss', loss)
-        return {'val_loss': loss}
+        result = pl.EvalResult(checkpoint_on=loss)
+        result.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True, reduce_fx=torch.mean)
+        return result
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -134,6 +136,7 @@ class ConditionalSS_Framework(pl.LightningModule):
         parser.add_argument('--masking_based', type=bool, default=True)
 
         parser.add_argument('--batch_size', type=int, default=16)
+        parser.add_argument('--dev_mode', type=bool, default=False)
 
         return parser
 
