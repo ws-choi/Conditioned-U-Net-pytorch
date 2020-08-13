@@ -1,19 +1,16 @@
 import abc
 from argparse import ArgumentParser
-from typing import Union, Dict
+
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
-from torch.nn import Module
 from torch.utils.data import DataLoader
 
 import models.cunet_model as cunet
-import pytorch_lightning as pl
-
 from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
 from global_config.config import config
-from models import fourier, cunet_model
+from models import fourier
 
 
 class ConditionalSS_Framework(pl.LightningModule):
