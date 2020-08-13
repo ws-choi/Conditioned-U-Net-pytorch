@@ -30,9 +30,12 @@ class MusdbTrainSet(Dataset):
         else:
             self.target_names = target_names
 
+        self.num_tracks = len(self.musdb_train)
+
         # development mode
-        self.num_tracks = 4 if dev_mode else len(self.musdb_train)
-        self.lengths = self.lengths[:4]
+        if dev_mode:
+            self.num_tracks = 4
+            self.lengths = self.lengths[:4]
 
         self.cache_mode = cache_mode
         if cache_mode:
@@ -85,9 +88,11 @@ class MusdbValidSet(Dataset):
         else:
             self.target_names = target_names
 
+        self.num_tracks = len(self.musdb_valid)
         # development mode
-        self.num_tracks = 4 if dev_mode else len(self.musdb_valid)
-        self.lengths = self.lengths[:4]
+        if dev_mode:
+            self.num_tracks = 4
+            self.lengths = self.lengths[:4]
 
         num_chunks = [length // self.window_length for length in self.lengths]
         self.chunk_idx = [sum(num_chunks[:i + 1]) for i in range(self.num_tracks)]
