@@ -1,16 +1,10 @@
-from typing import Union, List, Optional, Sequence, Dict, Tuple
-
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-from torch.optim import Optimizer
-from torch.utils.data import DataLoader
 
-from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
-from models.unet_model import u_net_deconv_block, Conv2d_same, ConvTranspose2d_same
 from models.FiLM_utils import FiLM_complex, FiLM_simple
 from models.control_models import dense_control_block, dense_control_model
-from global_config.config import config
+from models.unet_model import u_net_deconv_block, Conv2d_same, ConvTranspose2d_same
 
 
 def get_func_by_name(activation_str):
