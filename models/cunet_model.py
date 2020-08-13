@@ -48,6 +48,21 @@ class u_net_conv_block(pl.LightningModule):
 
 class CUNET(pl.LightningModule):
 
+    @staticmethod
+    def get_arg_keys():
+        return ['n_layers',
+                'input_channels',
+                'filters_layer_1',
+                'kernel_size',
+                'stride',
+                'film_type',
+                'control_type',
+                'encoder_activation',
+                'decoder_activation',
+                'last_activation',
+                'control_input_dim',
+                'control_n_layer']
+
     def __init__(self,
                  n_layers,
                  input_channels,
@@ -60,15 +75,16 @@ class CUNET(pl.LightningModule):
                  decoder_activation=nn.ReLU,
                  last_activation=nn.Sigmoid,
                  control_input_dim=4,
-                 control_n_layer=4,
-                 *args, **kwargs
+                 control_n_layer=4
                  ):
 
+        self.save_hyperparameters()
         encoder_activation = get_func_by_name(encoder_activation)
         decoder_activation = get_func_by_name(decoder_activation)
         last_activation = get_func_by_name(last_activation)
 
-        super(CUNET, self).__init__(*args, **kwargs)
+        super(CUNET, self).__init__()
+
         self.input_control_dims = control_input_dim
         self.n_layers = n_layers
         self.input_channels = input_channels

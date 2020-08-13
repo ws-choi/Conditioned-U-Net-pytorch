@@ -138,3 +138,5 @@ tmp*
 train/runs*
 
 runs*
+wandb/*
+checkpoints/*

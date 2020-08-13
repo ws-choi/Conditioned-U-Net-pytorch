@@ -8,8 +8,8 @@ import os
 
 
 def main(args):
-
     dict_args = vars(args)
+
     model_name = dict_args['model_name']
 
     if model_name == 'cunet':
@@ -17,34 +17,24 @@ def main(args):
     else:
         raise NotImplementedError
 
-    checkpoint_path =dict_args['checkpoints_path']
-    if not os.path.exists(checkpoint_path):
-        os.mkdir(checkpoint_path)
-
     if dict_args['log_system'] == 'wandb':
-        logger = WandbLogger(project='source_separation', tags=model_name, offline=False, id=dict_args['run_id'])
+        logger = WandbLogger(project='source_separation', tags=model_name, offline=False, id=temp_args.run_id)
         logger.log_hyperparams(model.hparams)
         logger.watch(model, log='all')
-        checkpoint_path += '/' + logger.version
-
-        if not os.path.exists(checkpoint_path):
-            os.mkdir(checkpoint_path)
 
     elif dict_args['log_system'] == 'tensorboard':
-        if not os.path.exists(dict_args['tensorboard_path']):
-            os.mkdir(dict_args['tensorboard_path'])
-        logger = pl_loggers.TensorBoardLogger(dict_args['tensorboard_path'], name=model_name)
+        if not os.path.exists(temp_args.tensorboard_path):
+            os.mkdir(temp_args.tensorboard_path)
+        logger = pl_loggers.TensorBoardLogger(temp_args.tensorboard_path, name=model_name)
     else:
         logger = True  # default
 
-
-
     checkpoint_callback = ModelCheckpoint(
-        filepath=checkpoint_path,
+        filepath=os.getcwd() + '/checkpoints',
         save_top_k=10,
         verbose=False,
         monitor='val_loss',
-        prefix=dict_args['model_name'] + '_'
+        prefix=temp_args.run_id
     )
 
     early_stop_callback = EarlyStopping(
@@ -78,11 +68,8 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser = Trainer.add_argparse_args(parser)
     parser.add_argument('--model_name', type=str, default='cunet')
-    parser.add_argument('--checkpoints_path', type=str, default='checkpoints/')
+    parser.add_argument('--checkpoints_path', type=str, default=None)
     parser.add_argument('--log_system', type=str, default='wandb')
-    parser.add_argument('--float16', type=bool, default=False)
-    parser.add_argument('--run_id', type=str, default=None)
-
 
     temp_args, _ = parser.parse_known_args()
     if temp_args.model_name == "cunet":

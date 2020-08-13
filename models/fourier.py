@@ -24,8 +24,8 @@ def mag_phase_to_complex(mag, phase, power=1.0):
 
 class STFT(pl.LightningModule):
 
-    def __init__(self, n_fft, hop_length, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, n_fft, hop_length):
+        super().__init__()
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.window = torch.nn.Parameter(torch.hann_window(n_fft), requires_grad=False)
@@ -90,8 +90,8 @@ class STFT(pl.LightningModule):
 
 
 class multi_channeled_STFT(pl.LightningModule):
-    def __init__(self, n_fft, hop_length, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, n_fft, hop_length):
+        super().__init__()
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.stft = STFT(n_fft, hop_length)
