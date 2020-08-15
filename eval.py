@@ -29,38 +29,13 @@ def main(args):
     else:
         logger = True  # default
 
-    checkpoint_callback = ModelCheckpoint(
-        filepath=os.getcwd() + '/checkpoints',
-        save_top_k=10,
-        verbose=False,
-        monitor='val_loss',
-        prefix=temp_args.run_id
+    trainer = Trainer(
+        gpus=temp_args.gpus,
+        logger=logger,
     )
 
-    early_stop_callback = EarlyStopping(
-        monitor='val_loss',
-        min_delta=0.0,
-        patience=3,
-        verbose=False
-
-    )
-    if dict_args['float16']:
-        trainer = Trainer(
-            gpus=temp_args.gpus,
-            precision=16,
-            logger=logger,
-            checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback
-        )
-    else:
-        trainer = Trainer(
-            gpus=temp_args.gpus,
-            logger=logger,
-            checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback
-        )
-
-    trainer.fit(model)
+    ckpt_path = dict_args['ckpt_path']
+    trainer.test(model, ckpt_path=ckpt_path)
 
 
 if __name__ == '__main__':
@@ -70,11 +45,13 @@ if __name__ == '__main__':
     parser.add_argument('--model_name', type=str, default='cunet')
     parser.add_argument('--checkpoints_path', type=str, default=None)
     parser.add_argument('--log_system', type=str, default='wandb')
+    parser.add_argument('--run_id', type=str, default=None)
+    parser.add_argument('--float16', type=bool, default=False)
+    parser.add_argument('--ckpt_path', type=str, default='best')
 
     temp_args, _ = parser.parse_known_args()
     if temp_args.model_name == "cunet":
         parser = CUNET_Framework.add_model_specific_args(parser)
-
 
     args = parser.parse_args()
 

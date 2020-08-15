@@ -1,20 +1,25 @@
 from abc import ABCMeta
 from argparse import ArgumentParser
 
+import numpy as np
 import pytorch_lightning as pl
+import soundfile
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 from torch.utils.data import DataLoader
 
 import models.cunet_model as cunet
-from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet
+from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet, MusdbTestSet
 from models import fourier
+import pydub
 
 
 class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
-    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, batch_size, dev_mode, optimizer, lr, num_workers, pin_memory, **kwargs):
+    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, batch_size, dev_mode, optimizer, lr,
+                 num_workers, pin_memory, test_mode, skip_train, **kwargs):
         super(Conditional_Source_Separation, self).__init__()
 
         self.n_fft = n_fft
@@ -31,8 +36,12 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
 
+        self.skip_train = skip_train
+        self.test_mode = test_mode
+        self.target_names = ['vocals', 'drums', 'bass', 'other']
+
         self.musdb_loader = MusdbLoader(musdb_root=self.musdb_root)
-        if self.data_cache:
+        if self.data_cache and not skip_train:
             self.cached_musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
                                                     n_fft=self.n_fft,
                                                     hop_length=self.hop_length,
@@ -45,6 +54,14 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                                                     num_frame=self.num_frame,
                                                     cache_mode=True,
                                                     dev_mode=self.dev_mode)
+
+        if self.data_cache and self.test_mode:
+            self.cached_musdb_test = MusdbTestSet(self.musdb_loader.musdb_valid,
+                                                  n_fft=self.n_fft,
+                                                  hop_length=self.hop_length,
+                                                  num_frame=self.num_frame,
+                                                  cache_mode=True,
+                                                  dev_mode=self.dev_mode)
 
     def train_dataloader(self) -> DataLoader:
         if self.data_cache:
@@ -75,6 +92,20 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           pin_memory=self.pin_memory)
+
+    def test_dataloader(self):
+        if self.data_cache:
+            self.musdb_test = self.cached_musdb_test
+        else:
+            self.musdb_test = MusdbTestSet(self.musdb_loader.musdb_test,
+                                           n_fft=self.n_fft,
+                                           hop_length=self.hop_length,
+                                           num_frame=self.num_frame,
+                                           cache_mode=False)
+
+        return DataLoader(self.musdb_test,
+                          batch_size=self.batch_size,
+                          shuffle=False)
 
     def configure_optimizers(self):
 
@@ -112,6 +143,56 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                    reduce_fx=torch.mean)
         return result
 
+    # def test_step(self, batch, batch_idx) :
+    #
+    #     mixture, input_conditions, targets = batch
+    #     loss = []
+    #     for input_condition, target_signal in zip(input_conditions,targets):
+    #         estimated_target = self.separate(mixture, input_condition)
+    #         loss.append(torch.nn.functional.mse_loss(estimated_target, target_signal))
+    #
+    def test_step(self, batch, batch_idx):
+        mixtures, mixture_idxs, window_offsets, input_conditions, target_names = batch
+
+        estimated_targets = self.separate(mixtures, input_conditions)
+
+        for mixture, mixture_idx, window_offset, input_condition, target_name, estimated_target \
+                in zip(mixtures, mixture_idxs, window_offsets, input_conditions, target_names, estimated_targets):
+            self.estimation_dict[target_name][mixture_idx.item()][
+                window_offset.item()] = estimated_target.detach().cpu().numpy()
+        return torch.zeros(0)
+
+    def on_test_epoch_start(self):
+        self.estimation_dict = {}
+        for target_name in self.target_names:
+            self.estimation_dict[target_name] = {mixture_idx: {}
+                                                 for mixture_idx
+                                                 in range(self.musdb_test.num_tracks)}
+
+    def on_test_epoch_end(self):
+        # for idx in range(self.musdb_test.num_tracks):
+        #     for target_name in self.target_names:
+        #         self.export_mp3(idx, target_name)
+        # for target_name in self.target_names:
+            # self.export_mp3(0, target_name)
+        target_name = 'vocals'
+        self.logger.experiment.log({"result_sample": [wandb.Audio(self.get_estimation(0, target_name)[44100*60:44100*65], caption='{}'.format(target_name), sample_rate=44100)]})
+
+    def export_mp3(self, idx, target_name):
+        estimated = self.estimation_dict[target_name][idx]
+        estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
+        soundfile.write('tmp_output.wav', estimated, samplerate=44100)
+        audio = pydub.AudioSegment.from_wav('tmp_output.wav')
+        audio.export('{}_estimated/output_{}.mp3'.format(idx, target_name))
+
+    def get_estimation(self, idx, target_name):
+        estimated = self.estimation_dict[target_name][idx]
+        estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
+        return estimated
+
+    def separate(self, input_signal, input_condition) -> torch.Tensor:
+        pass
+
     def init_weights(self):
         for param in self.parameters():
             if param.dim() > 1:
@@ -132,6 +213,8 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         parser.add_argument('--num_workers', type=int, default=0)
         parser.add_argument('--pin_memory', type=bool, default=False)
 
+        parser.add_argument('--test_mode', type=bool, default=False)
+        parser.add_argument('--skip_train', type=bool, default=False)
         return parser
 
 
@@ -156,8 +239,6 @@ class CUNET_Framework(Conditional_Source_Separation):
         CUNET_Args = cunet.CUNET.get_arg_keys()
         self.spec2spec = cunet.CUNET(**{key: kwargs[key] for key in CUNET_Args})
 
-
-
         self.init_weights()
 
     def forward(self, input_signal, input_condition):
@@ -175,13 +256,35 @@ class CUNET_Framework(Conditional_Source_Separation):
                 nn.init.kaiming_normal_(param)
 
     def to_spec(self, input_signal) -> torch.Tensor:
-        return self.stft.to_mag(input_signal).transpose(-1, -3)[..., 1:]
+        if self.magnitude_based:
+            return self.stft.to_mag(input_signal).transpose(-1, -3)[..., 1:]
+        else:
+            raise NotImplementedError
 
     def separate(self, input_signal, input_condition) -> torch.Tensor:
-        mag, phase = self.stft.to_mag_phase(input_signal)
-        mag_hat = self.forward(mag.transpose(-1, -3), input_condition)
-        return self.stft.restore_mag_phase(mag_hat.transpose(-1, -3), phase)
 
+        if self.magnitude_based:
+            mag, phase = self.stft.to_mag_phase(input_signal)
+            input_spec = mag.transpose(-1, -3)
+            output_spec = self.spec2spec(input_spec[..., 1:], input_condition)
+
+            if self.masking_based:
+                output_spec = input_spec[..., 1:] * output_spec
+            else:
+                raise NotImplementedError
+
+        else:
+            raise NotImplementedError
+
+        output_spec = torch.cat([input_spec[..., :1], output_spec], dim=-1)
+        output_spec = output_spec.transpose(-1, -3)
+
+        if self.magnitude_based:
+            restored = self.stft.restore_mag_phase(output_spec, phase)
+        else:
+            raise NotImplementedError
+
+        return restored
 
     @staticmethod
     def add_model_specific_args(parent_parser):

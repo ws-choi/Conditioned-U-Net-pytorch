@@ -17,10 +17,11 @@ class MusdbLoader(object):
 
 class MusdbTrainSet(Dataset):
 
-    def __init__(self, musdb_train, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True, dev_mode=False):
+    def __init__(self, musdb_train, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True,
+                 dev_mode=False):
 
         self.musdb_train = musdb_train
-        self.window_length = hop_length + hop_length * (num_frame - 1) - 1
+        self.window_length = hop_length * num_frame - 1
 
         self.lengths = [track.samples for track in self.musdb_train]
         self.source_names = ['vocals', 'drums', 'bass', 'other']  # == self.musdb_train.targets_names[:-2]
@@ -75,10 +76,11 @@ class MusdbTrainSet(Dataset):
 
 class MusdbValidSet(Dataset):
 
-    def __init__(self, musdb_valid, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True, dev_mode=False):
+    def __init__(self, musdb_valid, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True,
+                 dev_mode=False):
 
         self.musdb_valid = musdb_valid
-        self.window_length = hop_length + hop_length * (num_frame - 1) - 1
+        self.window_length = hop_length * num_frame - 1
 
         self.lengths = [track.samples for track in self.musdb_valid]
         self.source_names = ['vocals', 'drums', 'bass', 'other']  # == self.musdb_train.targets_names[:-2]
@@ -144,9 +146,90 @@ class MusdbValidSet(Dataset):
 
         return None, None
 
-# musdb = MusdbLoader('../data/musdb18_wav')
-# valid_set = MusdbValidSet(musdb.musdb_train, num_frame=256, cache_mode=False)
-# m, t, _ = valid_set[len(valid_set)-8]
-# for _ in valid_set:
-#     pass
-#
+
+class MusdbTestSet(Dataset):
+
+    def __init__(self, musdb_test, n_fft=2048, hop_length=1024, num_frame=64, target_names=None, cache_mode=True,
+                 dev_mode=False):
+
+        self.hop_length = hop_length
+        self.musdb_test = musdb_test
+        self.window_length = hop_length * num_frame - 1
+        self.true_samples = self.window_length-2*self.hop_length
+
+        self.lengths = [track.samples for track in self.musdb_test]
+        self.source_names = ['vocals', 'drums', 'bass', 'other']  # == self.musdb_train.targets_names[:-2]
+
+        if target_names is None:
+            self.target_names = self.source_names
+        else:
+            self.target_names = target_names
+
+        self.num_tracks = len(self.musdb_test)
+        # development mode
+        if dev_mode:
+            self.num_tracks = 1
+            self.lengths = self.lengths[:1]
+
+        import math
+        num_chunks = [math.ceil(length / (self.window_length - 2 * self.hop_length)) for length in self.lengths]
+        self.chunk_idx = [sum(num_chunks[:i + 1]) for i in range(self.num_tracks)]
+
+        self.cache_mode = cache_mode
+        if cache_mode:
+            self.cache = {}
+            print('cache audio files.')
+            for idx in tqdm(range(self.num_tracks)):
+                self.cache[idx] = {}
+                for source in self.source_names + ['linear_mixture']:
+                    self.cache[idx][source] = self.musdb_test[idx].targets[source].audio.astype(np.float32)
+
+    def __len__(self):
+        return self.chunk_idx[-1] * len(self.target_names)
+
+    def __getitem__(self, idx):
+
+        target_offset = idx % len(self.target_names)
+        idx = idx // len(self.target_names)
+
+        target_name = self.target_names[target_offset]
+        mixture, mixture_idx, offset = self.idx_to_track_offset(idx)
+
+        left_padding_num = right_padding_num = self.hop_length
+
+        if offset + self.window_length - self.hop_length > mixture.shape[0]:  # last
+            mixture = mixture[offset:]
+            samples = mixture.shape[0]
+            right_padding_num = self.window_length-self.hop_length - samples
+        else :
+            mixture = mixture[offset:offset + self.true_samples]
+
+        mixture = np.concatenate((np.zeros((left_padding_num, 2), dtype=np.float32), mixture, np.zeros((right_padding_num, 2), dtype=np.float32)), 0)
+
+        input_condition = np.zeros(len(self.target_names), dtype=np.float32)
+        input_condition[target_offset] = 1.
+
+        mixture, input_condition = [torch.from_numpy(output) for output in [mixture, input_condition]]
+        window_offset = offset// self.true_samples
+
+        return mixture, mixture_idx, window_offset, input_condition, target_name
+
+    def idx_to_track_offset(self, idx):
+
+        for mixture_idx, last_chunk in enumerate(self.chunk_idx):
+            if idx < last_chunk:
+
+                if self.cache_mode:
+                    mixture = self.cache[mixture_idx]['linear_mixture']
+                    # target = self.cache[i][target_name]
+                else:
+                    mixture = self.musdb_test[mixture_idx].targets['linear_mixture'].audio.astype(np.float32)
+                    # target = self.musdb_test[i].targets[target_name].audio.astype(np.float32)
+
+                if mixture_idx != 0:
+                    offset = (idx - self.chunk_idx[mixture_idx - 1]) * (self.window_length - 2 * self.hop_length)
+                else:
+                    offset = idx * (self.window_length - 2 * self.hop_length)
+                return mixture, mixture_idx, offset
+
+        return None, None

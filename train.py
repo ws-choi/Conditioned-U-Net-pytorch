@@ -50,7 +50,7 @@ def main(args):
     early_stop_callback = EarlyStopping(
         monitor='val_loss',
         min_delta=0.0,
-        patience=15,
+        patience=25,
         verbose=False
 
     )
@@ -71,6 +71,7 @@ def main(args):
         )
 
     trainer.fit(model)
+    trainer.test(model)
 
 
 if __name__ == '__main__':
