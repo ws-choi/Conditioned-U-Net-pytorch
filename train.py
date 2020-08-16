@@ -8,7 +8,6 @@ import os
 
 
 def main(args):
-
     dict_args = vars(args)
     model_name = dict_args['model_name']
 
@@ -17,10 +16,13 @@ def main(args):
     else:
         raise NotImplementedError
 
-    checkpoint_path =dict_args['checkpoints_path']
+    checkpoint_path = dict_args['checkpoints_path']
     if not os.path.exists(checkpoint_path):
         os.mkdir(checkpoint_path)
 
+    if dict_args['run_id'] is None:
+        import time
+        dict_args['run_id'] = model_name + "_" + str(time.time())
     if dict_args['log_system'] == 'wandb':
         logger = WandbLogger(project='source_separation', tags=model_name, offline=False, id=dict_args['run_id'])
         logger.log_hyperparams(model.hparams)
@@ -37,7 +39,7 @@ def main(args):
     else:
         logger = True  # default
 
-
+    distributed_backend = 'ddp' if dict_args['gpus'] > 1 else None
 
     checkpoint_callback = ModelCheckpoint(
         filepath=checkpoint_path,
@@ -60,18 +62,22 @@ def main(args):
             precision=16,
             logger=logger,
             checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback
+            early_stop_callback=early_stop_callback,
+            distributed_backend=distributed_backend
         )
     else:
         trainer = Trainer(
             gpus=temp_args.gpus,
             logger=logger,
             checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback
+            early_stop_callback=early_stop_callback,
+            distributed_backend=distributed_backend
         )
 
-    trainer.fit(model)
-    trainer.test(model)
+    if not dict_args['skip_train']:
+        trainer.fit(model)
+    if not dict_args['skip_test']:
+        trainer.test(model)
 
 
 if __name__ == '__main__':
@@ -80,15 +86,13 @@ if __name__ == '__main__':
     parser = Trainer.add_argparse_args(parser)
     parser.add_argument('--model_name', type=str, default='cunet')
     parser.add_argument('--checkpoints_path', type=str, default='checkpoints/')
-    parser.add_argument('--log_system', type=str, default='wandb')
+    parser.add_argument('--log_system', type=str, default=True)
     parser.add_argument('--float16', type=bool, default=False)
     parser.add_argument('--run_id', type=str, default=None)
-
 
     temp_args, _ = parser.parse_known_args()
     if temp_args.model_name == "cunet":
         parser = CUNET_Framework.add_model_specific_args(parser)
-
 
     args = parser.parse_args()
 
