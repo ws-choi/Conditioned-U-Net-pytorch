@@ -2,113 +2,42 @@ from abc import ABCMeta
 from argparse import ArgumentParser
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from pytorch_lightning.loggers import WandbLogger
-from torch.utils.data import DataLoader
+import pydub
 import pytorch_lightning as pl
 import soundfile
+import torch
+import torch.nn as nn
+import torch.nn.functional as f
 import wandb
-import pydub
-
+from pytorch_lightning.loggers import WandbLogger
 import models.cunet_model as cunet
-from data.data_loader import MusdbLoader, MusdbTrainSet, MusdbValidSet, MusdbTestSet
 from models import fourier
-from data import bbs_metric
+
+
+def get_estimation(idx, target_name, estimation_dict):
+    estimated = estimation_dict[target_name][idx]
+    if len(estimated) == 0:
+        raise NotImplementedError
+    estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
+    return estimated
 
 
 class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
-    def __init__(self, n_fft, hop_length, num_frame, musdb_root, no_data_cache, batch_size, dev_mode, optimizer, lr,
-                 num_workers, pin_memory, skip_test, skip_train, **kwargs):
+    def __init__(self, n_fft, hop_length, num_frame, optimizer, lr, dev_mode, **kwargs):
         super(Conditional_Source_Separation, self).__init__()
 
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.num_frame = num_frame
 
-        self.musdb_root = musdb_root
-        self.data_cache = not no_data_cache
-        self.batch_size = batch_size
-        self.dev_mode = dev_mode
-
         self.lr = lr
         self.optimizer = optimizer
-        self.num_workers = num_workers
-        self.pin_memory = pin_memory
 
-        self.skip_train = skip_train
-        self.skip_test = skip_test
         self.target_names = ['vocals', 'drums', 'bass', 'other']
+        self.valid_estimation_dict = {}
 
-        self.musdb_loader = MusdbLoader(musdb_root=self.musdb_root)
-        if self.data_cache and not skip_train:
-            self.cached_musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
-                                                    n_fft=self.n_fft,
-                                                    hop_length=self.hop_length,
-                                                    num_frame=self.num_frame,
-                                                    cache_mode=True,
-                                                    dev_mode=self.dev_mode)
-            self.cached_musdb_valid = MusdbValidSet(self.musdb_loader.musdb_valid,
-                                                    n_fft=self.n_fft,
-                                                    hop_length=self.hop_length,
-                                                    num_frame=self.num_frame,
-                                                    cache_mode=True,
-                                                    dev_mode=self.dev_mode)
-
-        if self.data_cache and not self.skip_test:
-            self.cached_musdb_test = MusdbTestSet(self.musdb_loader.musdb_test,
-                                                  n_fft=self.n_fft,
-                                                  hop_length=self.hop_length,
-                                                  num_frame=self.num_frame,
-                                                  cache_mode=True,
-                                                  dev_mode=self.dev_mode)
-
-    def train_dataloader(self) -> DataLoader:
-        if self.data_cache:
-            musdb_train = self.cached_musdb_train
-        else:
-            musdb_train = MusdbTrainSet(self.musdb_loader.musdb_train,
-                                        n_fft=self.n_fft,
-                                        hop_length=self.hop_length,
-                                        num_frame=self.num_frame,
-                                        cache_mode=False)
-
-        return DataLoader(musdb_train,
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers,
-                          pin_memory=self.pin_memory)
-
-    def val_dataloader(self):
-        if self.data_cache:
-            self.musdb_valid = self.cached_musdb_valid
-        else:
-            self.musdb_valid = MusdbValidSet(self.musdb_loader.musdb_valid,
-                                             n_fft=self.n_fft,
-                                             hop_length=self.hop_length,
-                                             num_frame=self.num_frame,
-                                             cache_mode=False)
-
-        return DataLoader(self.musdb_valid,
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers,
-                          pin_memory=self.pin_memory)
-
-    def test_dataloader(self):
-        self.musdb_test = MusdbTestSet(self.musdb_loader.musdb_test,
-                                       n_fft=self.n_fft,
-                                       hop_length=self.hop_length,
-                                       num_frame=self.num_frame,
-                                       cache_mode=False)
-        if not self.skip_test:
-            if self.data_cache:
-                self.musdb_test = self.cached_musdb_test
-
-        return DataLoader(self.musdb_test,
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers,
-                          pin_memory=self.pin_memory)
+        self.dev_mode = dev_mode
 
     def configure_optimizers(self):
 
@@ -129,20 +58,27 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         mixture_signal, target_signal, condition = batch
         target = self.to_spec(target_signal)
         target_hat = self.forward(mixture_signal, condition)
-        loss = F.mse_loss(target, target_hat)
+        loss = f.mse_loss(target, target_hat)
         result = pl.TrainResult(loss)
         result.log('loss/train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                    reduce_fx=torch.mean)
         return result
 
+    # Validation Process
+    def on_validation_epoch_start(self):
+        for target_name in self.target_names:
+            self.valid_estimation_dict[target_name] = {mixture_idx: {}
+                                                       for mixture_idx
+                                                       in range(14)}
+
     def validation_step(self, batch, batch_idx):
-        mixtures, mixture_idxs, window_offsets, input_conditions, target_names, targets = batch
+        mixtures, mixture_ids, window_offsets, input_conditions, target_names, targets = batch
 
         estimated_targets = self.separate(mixtures, input_conditions)[:, self.hop_length:-self.hop_length]
         targets = targets[:, self.hop_length:-self.hop_length]
 
         for mixture, mixture_idx, window_offset, input_condition, target_name, estimated_target \
-                in zip(mixtures, mixture_idxs, window_offsets, input_conditions, target_names, estimated_targets):
+                in zip(mixtures, mixture_ids, window_offsets, input_conditions, target_names, estimated_targets):
             self.valid_estimation_dict[target_name][mixture_idx.item()][
                 window_offset.item()] = estimated_target.detach().cpu().numpy()
 
@@ -161,19 +97,12 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                    reduce_fx=torch.mean)
         return result
 
-    def on_validation_epoch_start(self):
-        self.valid_estimation_dict = {}
-        for target_name in self.target_names:
-            self.valid_estimation_dict[target_name] = {mixture_idx: {}
-                                                       for mixture_idx
-                                                       in range(self.musdb_valid.num_tracks)}
-
     def on_validation_epoch_end(self):
-        val_idxs = [0] if self.dev_mode else [0, 1, 2]
-        for idx in val_idxs:
+        val_ids = [0] if self.dev_mode else [0, 1, 2]
+        for idx in val_ids:
             estimation = {}
             for target_name in self.target_names:
-                estimation[target_name] = self.get_estimation(0, target_name, self.valid_estimation_dict)
+                estimation[target_name] = get_estimation(idx, target_name, self.valid_estimation_dict)
                 if estimation[target_name] is not None:
                     estimation[target_name] = estimation[target_name].astype(np.float32)
 
@@ -183,47 +112,87 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                                         caption='{}_{}'.format(idx, target_name),
                                         sample_rate=44100)]})
 
-    def test_step(self, batch, batch_idx):
-        mixtures, mixture_idxs, window_offsets, input_conditions, target_names = batch
-
-        estimated_targets = self.separate(mixtures, input_conditions)
-
-        for mixture, mixture_idx, window_offset, input_condition, target_name, estimated_target \
-                in zip(mixtures, mixture_idxs, window_offsets, input_conditions, target_names, estimated_targets):
-            self.test_estimation_dict[target_name][mixture_idx.item()][
-                window_offset.item()] = estimated_target.detach().cpu().numpy()
-        return torch.zeros(0)
-
     def on_test_epoch_start(self):
+
+        import os
+        output_folder = 'museval_output'
+        if os.path.exists(output_folder):
+            os.rmdir(output_folder)
+        os.mkdir(output_folder)
+
         self.valid_estimation_dict = None
-        self.cached_musdb_valid = None
         self.test_estimation_dict = {}
+        self.test_true_dict = {}
+
+        self.musdb_test = self.test_dataloader().dataset
+        num_tracks = self.musdb_test.num_tracks
         for target_name in self.target_names:
             self.test_estimation_dict[target_name] = {mixture_idx: {}
                                                       for mixture_idx
-                                                      in range(self.musdb_test.num_tracks)}
+                                                      in range(num_tracks)}
+
+            self.test_true_dict[target_name] = {mixture_idx: self.musdb_test.get_audio(mixture_idx, target_name)
+                                                for mixture_idx in range(num_tracks)}
+
+    def test_step(self, batch, batch_idx):
+        mixtures, mixture_ids, window_offsets, input_conditions, target_names = batch
+
+        estimated_targets = self.separate(mixtures, input_conditions)[:, self.hop_length:-self.hop_length]
+
+        for mixture, mixture_idx, window_offset, input_condition, target_name, estimated_target \
+                in zip(mixtures, mixture_ids, window_offsets, input_conditions, target_names, estimated_targets):
+            self.test_estimation_dict[target_name][mixture_idx.item()][
+                window_offset.item()] = estimated_target.detach().cpu().numpy()
+
+            # print(mixture_idx.item(), ':', target_name, window_offset.item() )
+
+        # pl.metrics.converters.sync_ddp()
+        return torch.zeros(0)
 
     def on_test_epoch_end(self):
-        target_name = 'vocals'
-        idx_list = [0] if self.dev_mode else range(self.musdb_test.num_tracks)
+
+        import museval
+        results = museval.EvalStore(frames_agg='median', tracks_agg='median')
+        idx_list = [3, 2, 1, 0] if self.dev_mode else range(self.musdb_test.num_tracks)
+
         for idx in idx_list:
             estimation = {}
             for target_name in self.target_names:
-                estimation[target_name] = self.get_estimation(0, target_name, self.valid_estimation_dict)
+                estimation[target_name] = get_estimation(idx, target_name, self.test_estimation_dict)
                 if estimation[target_name] is not None:
                     estimation[target_name] = estimation[target_name].astype(np.float32)
 
             # Real SDR
             if len(estimation) == len(self.target_names):
-                true_targets = [self.musdb_valid.get_audio(idx, target_name) for target_name in self.target_names]
-                estimated_targets = [estimation[target_name] for target_name in self.target_names]
-                if true_targets[0].shape[0] > estimated_targets[0].shape[0]:
-                    pass
-                else:
-                    bbs_metric.musdb_all()
+                true_targets = [self.test_true_dict[target_name][idx] for target_name in self.target_names]
+                track_length = true_targets[0].shape[0]
+                estimated_targets = [estimation[target_name][:track_length] for target_name in self.target_names]
 
-    def on_load_checkpoint(self, checkpoint) :
-        pass
+                if track_length > estimated_targets[0].shape[0]:
+                    raise NotImplementedError
+                else:
+                    estimated_targets_dict = {target_name: estimation[target_name][:track_length] for target_name in
+                                              self.target_names}
+                    track_score = museval.eval_mus_track(
+                        self.musdb_test.musdb_test[idx],
+                        estimated_targets_dict
+                    )
+
+                    score_dict = track_score.df.loc[:, ['target', 'metric', 'score']].groupby(['target', 'metric'])['score'].median().to_dict()
+
+                    if isinstance(self.logger, WandbLogger):
+                        self.logger.experiment.log(
+                            {'test_result/{}_{}'.format(k1,k2): score_dict[(k1, k2)] for k1, k2 in score_dict.keys()})
+
+                    else:
+                        print(track_score)
+
+                    results.add_track(track_score)
+
+        if isinstance(self.logger, WandbLogger):
+            self.logger.experiment.log({'test_result/agg': str(results)})
+        else:
+            print(results)
 
     def export_mp3(self, idx, target_name):
         estimated = self.test_estimation_dict[target_name][idx]
@@ -231,13 +200,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         soundfile.write('tmp_output.wav', estimated, samplerate=44100)
         audio = pydub.AudioSegment.from_wav('tmp_output.wav')
         audio.export('{}_estimated/output_{}.mp3'.format(idx, target_name))
-
-    def get_estimation(self, idx, target_name, estimation_dict):
-        estimated = estimation_dict[target_name][idx]
-        if len(estimated) == 0:
-            return None
-        estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
-        return estimated
 
     def separate(self, input_signal, input_condition) -> torch.Tensor:
         pass
@@ -251,19 +213,9 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
 
-        parser.add_argument('--musdb_root', type=str, default='data/musdb18_wav/')
-        parser.add_argument('--musdb_is_wav', type=bool, default=False)
-        parser.add_argument('--no_data_cache', type=bool, default=False)
-        parser.add_argument('--dev_mode', type=bool, default=False)
-
-        parser.add_argument('--batch_size', type=int, default=16)
         parser.add_argument('--lr', type=float, default=1e-3)
         parser.add_argument('--optimizer', type=str, default='adam')
-        parser.add_argument('--num_workers', type=int, default=0)
-        parser.add_argument('--pin_memory', type=bool, default=False)
 
-        parser.add_argument('--skip_test', type=bool, default=False)
-        parser.add_argument('--skip_train', type=bool, default=False)
         return parser
 
 
@@ -271,8 +223,8 @@ class CUNET_Framework(Conditional_Source_Separation):
 
     @staticmethod
     def get_arg_keys():
-        return ['n_fft', 'hop_length', 'num_frame', 'spec_type', 'spec_est_mode', 'optimizer',
-                'lr'] + cunet.CUNET.get_arg_keys()
+        return ['n_fft', 'hop_length', 'num_frame', 'spec_type', 'spec_est_mode', 'optimizer', 'lr', 'dev_mode'] \
+               + cunet.CUNET.get_arg_keys()
 
     def __init__(self, n_fft, hop_length, num_frame, spec_type, spec_est_mode, **kwargs):
         super(CUNET_Framework, self).__init__(n_fft, hop_length, num_frame, **kwargs)
@@ -286,8 +238,8 @@ class CUNET_Framework(Conditional_Source_Separation):
         self.masking_based = spec_est_mode == "masking"
         self.stft = fourier.multi_channeled_STFT(n_fft=n_fft, hop_length=hop_length)
 
-        CUNET_Args = cunet.CUNET.get_arg_keys()
-        self.spec2spec = cunet.CUNET(**{key: kwargs[key] for key in CUNET_Args})
+        cunet_args = cunet.CUNET.get_arg_keys()
+        self.spec2spec = cunet.CUNET(**{key: kwargs[key] for key in cunet_args})
 
         self.init_weights()
 
@@ -339,7 +291,6 @@ class CUNET_Framework(Conditional_Source_Separation):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
-        parser = Conditional_Source_Separation.add_model_specific_args(parser)
 
         parser.add_argument('--n_fft', type=int, default=1024)
         parser.add_argument('--hop_length', type=int, default=256)
@@ -360,4 +311,4 @@ class CUNET_Framework(Conditional_Source_Separation):
         parser.add_argument('--control_input_dim', type=int, default=4)
         parser.add_argument('--control_n_layer', type=int, default=4)
 
-        return parser
+        return Conditional_Source_Separation.add_model_specific_args(parser)

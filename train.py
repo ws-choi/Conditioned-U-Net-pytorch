@@ -1,6 +1,8 @@
 from argparse import ArgumentParser
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning import Trainer
+
+from data.dataloaders import DataProvider
 from models.separation_framework import CUNET_Framework
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
@@ -74,10 +76,18 @@ def main(args):
             distributed_backend=distributed_backend
         )
 
+    data_provider = DataProvider(**dict_args)
+
+    n_fft, hop_length, num_frame = [dict_args[key] for key in ['n_fft', 'hop_length', 'num_frame']]
+
+    train_dataloader = data_provider.get_train_dataloader(n_fft, hop_length, num_frame)
+    valid_dataloader = data_provider.get_valid_dataloader(n_fft, hop_length, num_frame)
+#    test_dataloader = data_provider.get_test_dataloader(n_fft, hop_length, num_frame)
+
     if not dict_args['skip_train']:
-        trainer.fit(model)
-    if not dict_args['skip_test']:
-        trainer.test(model)
+        trainer.fit(model, train_dataloader, valid_dataloader)
+    # if not dict_args['skip_test']:
+    #     trainer.test(model, test_dataloader)
 
 
 if __name__ == '__main__':
@@ -90,10 +100,15 @@ if __name__ == '__main__':
     parser.add_argument('--float16', type=bool, default=False)
     parser.add_argument('--run_id', type=str, default=None)
 
+    parser.add_argument('--skip_train', type=bool, default=False)
+    parser.add_argument('--skip_test', type=bool, default=False)
+
+
     temp_args, _ = parser.parse_known_args()
     if temp_args.model_name == "cunet":
         parser = CUNET_Framework.add_model_specific_args(parser)
 
+    parser = DataProvider.add_data_provider_args(parser)
     args = parser.parse_args()
 
     # train
