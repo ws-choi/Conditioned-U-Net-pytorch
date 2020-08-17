@@ -178,11 +178,13 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                         estimated_targets_dict
                     )
 
-                    score_dict = track_score.df.loc[:, ['target', 'metric', 'score']].groupby(['target', 'metric'])['score'].median().to_dict()
+                    score_dict = track_score.df.loc[:, ['target', 'metric', 'score']].groupby(
+                        ['target', 'metric'])['score']\
+                        .median().to_dict()
 
                     if isinstance(self.logger, WandbLogger):
                         self.logger.experiment.log(
-                            {'test_result/{}_{}'.format(k1,k2): score_dict[(k1, k2)] for k1, k2 in score_dict.keys()})
+                            {'test_result/{}_{}'.format(k1, k2): score_dict[(k1, k2)] for k1, k2 in score_dict.keys()})
 
                     else:
                         print(track_score)
@@ -190,7 +192,16 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
                     results.add_track(track_score)
 
         if isinstance(self.logger, WandbLogger):
-            self.logger.experiment.log({'test_result/agg': str(results)})
+
+            result_dict = results.df.groupby(
+                ['track', 'target', 'metric']
+            )['score'].median().reset_index().groupby(
+                ['target', 'metric']
+            )['score'].median().to_dict()
+
+            self.logger.experiment.log(
+                {'test_result/agg/{}_{}'.format(k1, k2): result_dict[(k1, k2)] for k1, k2 in result_dict.keys()}
+            )
         else:
             print(results)
 
