@@ -40,12 +40,15 @@ class MusdbTrainSet(Dataset):
 
         self.cache_mode = cache_mode
         if cache_mode:
-            self.cache = {}
-            print('cache audio files.')
-            for idx in tqdm(range(self.num_tracks)):
-                self.cache[idx] = {}
-                for source in self.source_names:
-                    self.cache[idx][source] = self.musdb_train[idx].targets[source].audio.astype(np.float32)
+            self.cache_dataset()
+
+    def cache_dataset(self):
+        self.cache = {}
+        print('cache audio files.')
+        for idx in tqdm(range(self.num_tracks)):
+            self.cache[idx] = {}
+            for source in self.source_names:
+                self.cache[idx][source] = self.musdb_train[idx].targets[source].audio.astype(np.float32)
 
     def __len__(self):
         return sum([length // self.window_length for length in self.lengths]) * len(self.target_names)
@@ -107,12 +110,15 @@ class MusdbTestSet(Dataset):
 
         self.cache_mode = cache_mode
         if cache_mode:
-            self.cache = {}
-            print('cache audio files.')
-            for idx in tqdm(range(self.num_tracks)):
-                self.cache[idx] = {}
-                self.cache[idx]['linear_mixture'] = self.musdb_test[idx].targets['linear_mixture'].audio.astype(
-                    np.float32)
+            self.cache_dataset()
+
+    def cache_dataset(self):
+        self.cache = {}
+        print('cache audio files.')
+        for idx in tqdm(range(self.num_tracks)):
+            self.cache[idx] = {}
+            self.cache[idx]['linear_mixture'] = self.musdb_test[idx].targets['linear_mixture'].audio.astype(
+                np.float32)
 
     def __len__(self):
         return self.chunk_idx[-1] * len(self.target_names)
@@ -199,12 +205,15 @@ class MusdbValidSet(Dataset):
 
         self.cache_mode = cache_mode
         if cache_mode:
-            self.cache = {}
-            print('cache audio files.')
-            for idx in tqdm(range(self.num_tracks)):
-                self.cache[idx] = {}
-                for source in self.source_names + ['linear_mixture']:
-                    self.cache[idx][source] = self.musdb_valid[idx].targets[source].audio.astype(np.float32)
+            self.cache_dataset()
+
+    def cache_dataset(self):
+        self.cache = {}
+        print('cache audio files.')
+        for idx in tqdm(range(self.num_tracks)):
+            self.cache[idx] = {}
+            for source in self.source_names + ['linear_mixture']:
+                self.cache[idx][source] = self.musdb_valid[idx].targets[source].audio.astype(np.float32)
 
     def __len__(self):
         return self.chunk_idx[-1] * len(self.target_names)
@@ -253,7 +262,7 @@ class MusdbValidSet(Dataset):
         return None, None
 
     def get_audio(self, idx, target_name, pos=0, length=None):
-        if self.cache_mode and target_name=='linear_mixture':
+        if self.cache_mode:
             track = self.cache[idx][target_name]
         else:
             track = self.musdb_valid[idx].targets[target_name].audio.astype(np.float32)
