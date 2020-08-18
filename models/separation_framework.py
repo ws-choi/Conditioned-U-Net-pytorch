@@ -1,5 +1,6 @@
 from abc import ABCMeta
 from argparse import ArgumentParser
+from warnings import warn
 
 import numpy as np
 import pydub
@@ -17,7 +18,8 @@ from models import fourier
 def get_estimation(idx, target_name, estimation_dict):
     estimated = estimation_dict[target_name][idx]
     if len(estimated) == 0:
-        raise NotImplementedError
+        warn('TODO: zero estimation, caused by ddp')
+        return None
     estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
     return estimated
 
@@ -103,6 +105,8 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
             estimation = {}
             for target_name in self.target_names:
                 estimation[target_name] = get_estimation(idx, target_name, self.valid_estimation_dict)
+                if estimation[target_name] is None:
+                    continue
                 if estimation[target_name] is not None:
                     estimation[target_name] = estimation[target_name].astype(np.float32)
 
