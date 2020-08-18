@@ -81,11 +81,8 @@ def main(args):
 
     train_dataloader = data_provider.get_train_dataloader(n_fft, hop_length, num_frame)
     valid_dataloader = data_provider.get_valid_dataloader(n_fft, hop_length, num_frame)
-    # test_dataloader = data_provider.get_test_dataloader(n_fft, hop_length, num_frame)
 
     trainer.fit(model, train_dataloader, valid_dataloader)
-    # trainer.test(model, test_dataloader)
-
 
 if __name__ == '__main__':
 
