@@ -83,7 +83,6 @@ class CUNET(pl.LightningModule):
         self.n_layers = n_layers
         self.input_channels = input_channels
         self.filters_layer_1 = filters_layer_1
-        encoder_layers = []
 
         # Encoder
         encoders = []
