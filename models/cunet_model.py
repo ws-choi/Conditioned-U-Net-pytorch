@@ -173,13 +173,3 @@ class CUNET(pl.LightningModule):
             x = decoder(torch.cat([x, x_encoded], dim=-3))
 
         return x
-
-#
-#
-#
-# model = CUNET(6, 2, 16, film_type='simple')
-# x_spectrogram = torch.randn((16, 2, 512, 128))
-# x_condition = torch.randn((16, 4))
-# encoded = model(x_spectrogram, x_condition)
-#
-# a = 3;
