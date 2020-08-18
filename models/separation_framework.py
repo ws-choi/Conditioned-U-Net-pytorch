@@ -94,7 +94,7 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         # large value of SDR means good performance, so that we take the negative of sdr for the validation loss
         loss = -1 * loss
 
-        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
+        result = pl.EvalResult()
         result.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                    reduce_fx=torch.mean)
         return result
@@ -126,7 +126,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
         self.valid_estimation_dict = None
         self.test_estimation_dict = {}
-        self.test_true_dict = {}
 
         self.musdb_test = self.test_dataloader().dataset
         num_tracks = self.musdb_test.num_tracks
@@ -134,9 +133,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
             self.test_estimation_dict[target_name] = {mixture_idx: {}
                                                       for mixture_idx
                                                       in range(num_tracks)}
-
-            self.test_true_dict[target_name] = {mixture_idx: self.musdb_test.get_audio(mixture_idx, target_name)
-                                                for mixture_idx in range(num_tracks)}
 
     def test_step(self, batch, batch_idx):
         mixtures, mixture_ids, window_offsets, input_conditions, target_names = batch
@@ -148,9 +144,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
             self.test_estimation_dict[target_name][mixture_idx.item()][
                 window_offset.item()] = estimated_target.detach().cpu().numpy()
 
-            # print(mixture_idx.item(), ':', target_name, window_offset.item() )
-
-        # pl.metrics.converters.sync_ddp()
         return torch.zeros(0)
 
     def on_test_epoch_end(self):
@@ -168,8 +161,7 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
             # Real SDR
             if len(estimation) == len(self.target_names):
-                true_targets = [self.test_true_dict[target_name][idx] for target_name in self.target_names]
-                track_length = true_targets[0].shape[0]
+                track_length = self.musdb_test.musdb_test[idx].samples
                 estimated_targets = [estimation[target_name][:track_length] for target_name in self.target_names]
 
                 if track_length > estimated_targets[0].shape[0]:

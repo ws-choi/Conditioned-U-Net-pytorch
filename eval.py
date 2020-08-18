@@ -76,6 +76,9 @@ if __name__ == '__main__':
     temp_args, _ = parser.parse_known_args()
     if temp_args.model_name == "cunet":
         parser = CUNET_Framework.add_model_specific_args(parser)
+    else:
+        warn("no model name")
+        raise NotImplementedError
 
     parser = DataProvider.add_data_provider_args(parser)
     args = parser.parse_args()

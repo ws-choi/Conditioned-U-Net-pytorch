@@ -8,14 +8,13 @@ from pytorch_lightning.loggers import WandbLogger
 
 from data.dataloaders import DataProvider
 from models.separation_framework import CUNET_Framework
-from scripts.utils import get_model
+from models.utils import get_model
 
 
 def main(args):
     dict_args = vars(args)
 
     model_name = dict_args['model_name']
-
 
     model = get_model(model_name, dict_args)
 
