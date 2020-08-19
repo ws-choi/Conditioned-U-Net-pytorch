@@ -13,8 +13,17 @@ pip install musdb museval pytorch_lightning effortless_config tensorboard wandb 
 pip install https://github.com/PytorchLightning/pytorch-lightning/archive/0.9.0rc12.zip --upgrade
 ```
 
+## Evaluation Result
 
-## Training
+|Name                     |control_input_dim|control_n_layer|control_type|decoder_activation|encoder_activation|film_type|filters_layer_1|hop_length|input_channels|kernel_size|last_activation|lr   |n_fft|n_layers|num_frame|optimizer|stride|test_result/agg/bass_ISR|test_result/agg/bass_SAR|test_result/agg/bass_SDR|test_result/agg/bass_SIR|test_result/agg/drums_ISR|test_result/agg/drums_SAR|test_result/agg/drums_SDR|test_result/agg/drums_SIR|test_result/agg/other_ISR|test_result/agg/other_SAR|test_result/agg/other_SDR|test_result/agg/other_SIR|test_result/agg/vocals_ISR|test_result/agg/vocals_SAR|test_result/agg/vocals_SDR|test_result/agg/vocals_SIR|
+|-------------------------|-----------------|---------------|------------|------------------|------------------|---------|---------------|----------|--------------|-----------|---------------|-----|-----|--------|---------|---------|------|------------------------|------------------------|------------------------|------------------------|-------------------------|-------------------------|-------------------------|-------------------------|-------------------------|-------------------------|-------------------------|-------------------------|--------------------------|--------------------------|--------------------------|--------------------------|
+|complex_2048_512_128eval |4                |4              |dense       |relu              |leaky_relu        |complex  |24             |512       |2             |[5,5]      |sigmoid        |0.001|2048 |6       |128      |adam     |[2,2] |8.84835                 |4.81325                 |2.795465                |4.114615                |9.69044                  |4.2979225                |3.492365                 |4.63526                  |6.93455                  |3.87871                  |1.85376                  |1.0855625                |6.0647475                 |2.2080925                 |2.49749                   |8.3487875                 |
+|complex_32eval_          |4                |4              |dense       |relu              |leaky_relu        |complex  |32             |256       |2             |[5,5]      |sigmoid        |0.001|1024 |6       |256      |adam     |[2,2] |8.0865575               |4.79529                 |2.1145975               |2.6459025               |10.019905                |4.9158075                |3.795275                 |4.92333                  |7.5122025                |4.58683                  |1.705415                 |1.07406                  |7.470695                  |3.63371                   |2.415865                  |6.5487125                 |
+|cunet_mme_sigmoid_32-eval|4                |4              |dense       |relu              |leaky_relu        |simple   |32             |256       |2             |[5,5]      |sigmoid        |0.001|1024 |6       |256      |adam     |[2,2] |7.6462525               |4.90194                 |1.84956                 |1.9313625               |9.4997225                |4.6694725                |3.327125                 |4.113235                 |7.648405                 |4.659825                 |1.500495                 |0.5541025                |6.710985                  |3.602105                  |2.12235                   |5.72728                   |
+
+## How to use
+
+### Training
 - train.py 
     - parameters related to dataset
         - --**musdb_root**  ```your musdb path``` 
@@ -66,11 +75,11 @@ pip install https://github.com/PytorchLightning/pytorch-lightning/archive/0.9.0r
         - --float16 ```True```
             - if True, then 16 precision training enabled
                         
-### example
+#### example
 ```shell script
 /train.py --musdb_root ../repos/musdb18_wav --filed_mode True --n_fft 2048 --hop_length 512 --num_frame 128 --filters_layer_1 24 --last_activation sigmoid --film_type complex --num_workers 20 --pin_memory True --log_system wandb --float16 True --batch_size 128 --gpus 2 --distributed_backend ddp --save_top_k 20 --patience 20
 ```
-## Evaluation
+### Evaluation
 
 - eval.py 
     - parameters related to dataset
@@ -121,7 +130,7 @@ pip install https://github.com/PytorchLightning/pytorch-lightning/archive/0.9.0r
         - --float16 ```True```
             - if True, then 16 precision training enabled
             
-### example
+#### example
 ```shell script
 /eval.py --musdb_root ../repos/musdb18_wav --filed_mode True --n_fft 2048 --hop_length 512 --num_frame 128 --filters_layer_1 24 --last_activation sigmoid --film_type complex --num_workers 20 --pin_memory True --log_system wandb --float16 True --batch_size 128 --gpus 1 --run_id complex_2048_512_128 --model_name cunet --epoch 52
 ```
