@@ -1,9 +1,14 @@
+
 # Conditioned-U-Net-pytorch
 An unofficial pytorch implementation of Conditioned-U-Net
 
+## News
+
+An [extension](https://github.com/ws-choi/Conditioned-Source-Separation-LaSAFT) of this model was released.
 
 
-## installation
+
+## Installation
 
 ```
 conda install pytorch>=1.6 cudatoolkit=10.2 -c pytorch
